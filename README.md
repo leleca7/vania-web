@@ -7,7 +7,7 @@ Painel pessoal da Vania para organizar oportunidades de renda remota, freelas, e
 - **Frontend:** HTML/CSS/JS mobile-first.
 - **Login e banco:** Supabase Auth + Postgres com RLS por usuário.
 - **IA:** Vercel AI Gateway via AI SDK, executada somente no backend.
-- **Monitor:** endpoint agendado a cada 12h; a preferência individual decide se cada ciclo roda em 12h ou 24h.
+- **Monitor:** no plano Vercel Hobby, o cron roda 1 vez por dia; ao abrir o painel e pelo botão manual, a preferência individual ainda pode respeitar ciclos de 12h ou 24h.
 - **Segurança:** nenhuma chave secreta fica no navegador ou no GitHub.
 
 ## Dados salvos
@@ -38,6 +38,10 @@ A IA pode analisar e resumir oportunidades, estimar prioridade, preparar propost
    - executar a análise de IA;
    - registrar um ganho;
    - executar o monitor manual.
+
+### Cron no plano Hobby
+
+O deploy usa `0 12 * * *`, ou seja, um ciclo agendado por dia. A limitação evita a falha de deploy do plano Hobby. O monitor também é executado quando a usuária entra no painel se o ciclo configurado estiver vencido, e pode ser disparado manualmente.
 
 ### Observação sobre Supabase Data API
 
