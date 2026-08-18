@@ -9,7 +9,7 @@
     "api/**/*.js": { "maxDuration": 60 }
   },
   "crons": [
-    { "path": "/api/monitor", "schedule": "0 */12 * * *" }
+    { "path": "/api/monitor", "schedule": "0 12 * * *" }
   ],
   "headers": [
     {

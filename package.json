@@ -1,6 +1,6 @@
 {
   "name": "vania-work",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Assistente de oportunidades remotas da Vania",
@@ -10,6 +10,6 @@
     "zod": "^4.1.5"
   },
   "engines": {
-    "node": ">=20"
+    "node": "24.x"
   }
 }

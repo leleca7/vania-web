@@ -116,27 +116,48 @@ alter table public.platform_rules enable row level security;
 
 -- Usuária autenticada vê e altera somente seus próprios dados.
 drop policy if exists "profiles_self_all" on public.profiles;
-create policy "profiles_self_all" on public.profiles for all using (auth.uid() = id) with check (auth.uid() = id);
+create policy "profiles_self_all" on public.profiles
+  for all to authenticated
+  using ((select auth.uid()) = id)
+  with check ((select auth.uid()) = id);
 
 drop policy if exists "preferences_self_all" on public.user_preferences;
-create policy "preferences_self_all" on public.user_preferences for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "preferences_self_all" on public.user_preferences
+  for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 drop policy if exists "opportunities_self_all" on public.opportunities;
-create policy "opportunities_self_all" on public.opportunities for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "opportunities_self_all" on public.opportunities
+  for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 drop policy if exists "earnings_self_all" on public.earnings;
-create policy "earnings_self_all" on public.earnings for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "earnings_self_all" on public.earnings
+  for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 drop policy if exists "monitor_runs_self_all" on public.monitor_runs;
-create policy "monitor_runs_self_all" on public.monitor_runs for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "monitor_runs_self_all" on public.monitor_runs
+  for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 drop policy if exists "ai_events_self_select" on public.ai_events;
-create policy "ai_events_self_select" on public.ai_events for select using (auth.uid() = user_id);
+create policy "ai_events_self_select" on public.ai_events
+  for select to authenticated
+  using ((select auth.uid()) = user_id);
+
 drop policy if exists "ai_events_self_insert" on public.ai_events;
-create policy "ai_events_self_insert" on public.ai_events for insert with check (auth.uid() = user_id);
+create policy "ai_events_self_insert" on public.ai_events
+  for insert to authenticated
+  with check ((select auth.uid()) = user_id);
 
 drop policy if exists "platform_rules_authenticated_read" on public.platform_rules;
-create policy "platform_rules_authenticated_read" on public.platform_rules for select to authenticated using (true);
+create policy "platform_rules_authenticated_read" on public.platform_rules
+  for select to authenticated using (true);
 
 create or replace function public.set_updated_at()
 returns trigger language plpgsql as $$
@@ -177,6 +198,42 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- Se a conta tiver sido criada antes da migration, garante o perfil e as preferências.
+insert into public.profiles (id, display_name)
+select id, coalesce(raw_user_meta_data->>'display_name', 'Vania')
+from auth.users
+on conflict (id) do nothing;
+
+insert into public.user_preferences (user_id)
+select id
+from auth.users
+on conflict (user_id) do nothing;
+
+-- Supabase passou a permitir projetos em que tabelas novas não são expostas
+-- automaticamente ao Data API. Estes grants tornam o acesso explícito; o RLS
+-- acima continua sendo a camada de autorização por linha.
+grant usage on schema public to authenticated, service_role;
+
+grant select, update on public.profiles to authenticated;
+grant select, update on public.user_preferences to authenticated;
+grant select, insert, update, delete on public.opportunities to authenticated;
+grant select, insert, update, delete on public.earnings to authenticated;
+grant select, insert, update on public.monitor_runs to authenticated;
+grant select, insert on public.ai_events to authenticated;
+grant select on public.platform_rules to authenticated;
+
+-- O monitor agendado usa a service role através do Data API.
+grant select, insert, update, delete on public.profiles to service_role;
+grant select, insert, update, delete on public.user_preferences to service_role;
+grant select, insert, update, delete on public.opportunities to service_role;
+grant select, insert, update, delete on public.earnings to service_role;
+grant select, insert, update, delete on public.monitor_runs to service_role;
+grant select, insert, update, delete on public.ai_events to service_role;
+grant select, insert, update, delete on public.platform_rules to service_role;
+
+-- A função só precisa ser chamada pelo trigger; não deve ser uma RPC pública.
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
 
 -- Regras iniciais. A aplicação ainda verifica as regras atuais antes de ampliar automações.
 insert into public.platform_rules(platform, automation_policy, notes)
