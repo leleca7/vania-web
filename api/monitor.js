@@ -1,13 +1,13 @@
-import { adminClient, requireUser } from './_lib/supabase.js';
+import { requireUser } from './_lib/supabase.js';
 import { analyzeOpportunity, model } from './_lib/ai.js';
-import { body, json } from './_lib/http.js';
+import { body, json, method } from './_lib/http.js';
 
 function hoursSince(iso) {
   if (!iso) return Infinity;
   return (Date.now() - new Date(iso).getTime()) / 36e5;
 }
 
-async function runForUser(supabase, userId, triggerType = 'scheduled', force = false) {
+async function runForUser(supabase, userId, triggerType = 'manual', force = false) {
   const { data: prefs } = await supabase.from('user_preferences').select('*').eq('user_id', userId).maybeSingle();
   const cycle = prefs?.monitor_cycle_hours || 12;
   if (prefs && prefs.monitor_enabled === false) return { skipped: true, reason: 'monitor_disabled' };
@@ -38,7 +38,8 @@ async function runForUser(supabase, userId, triggerType = 'scheduled', force = f
         ai_estimated_hourly_usd: result.estimated_hourly_usd,
         ai_last_analyzed_at: new Date().toISOString()
       };
-      await supabase.from('opportunities').update(update).eq('id', opportunity.id);
+      const { error: updateError } = await supabase.from('opportunities').update(update).eq('id', opportunity.id);
+      if (updateError) throw updateError;
       await supabase.from('ai_events').insert({ user_id: userId, opportunity_id: opportunity.id, event_type: 'monitor', model, payload: result });
       analyzed.push({ ...opportunity, ...update });
     }
@@ -67,26 +68,12 @@ async function runForUser(supabase, userId, triggerType = 'scheduled', force = f
 }
 
 export default async function handler(req, res) {
+  if (!method(req, res, ['POST'])) return;
   try {
-    const cronSecret = process.env.CRON_SECRET;
-    const auth = req.headers.authorization || '';
-    const isCron = Boolean(cronSecret && auth === `Bearer ${cronSecret}`);
-
-    if (isCron) {
-      const admin = adminClient();
-      const { data: prefs, error } = await admin.from('user_preferences').select('user_id').eq('monitor_enabled', true);
-      if (error) throw error;
-      const results = [];
-      for (const row of prefs || []) {
-        try { results.push({ userId: row.user_id, ...(await runForUser(admin,row.user_id,'scheduled',false)) }); }
-        catch (e) { results.push({ userId: row.user_id, error: String(e.message||e) }); }
-      }
-      return json(res, 200, { ok:true, users: results.length, results });
-    }
-
     const { supabase, user } = await requireUser(req);
-    const input = req.method === 'POST' ? await body(req) : {};
-    const result = await runForUser(supabase, user.id, input.triggerType || 'manual', Boolean(input.force));
+    const input = await body(req);
+    const triggerType = input.triggerType === 'login' ? 'login' : 'manual';
+    const result = await runForUser(supabase, user.id, triggerType, Boolean(input.force));
     json(res, 200, { ok:true, result });
   } catch (error) {
     json(res, error.status || 500, { error: error.message || 'Falha no monitor.' });
