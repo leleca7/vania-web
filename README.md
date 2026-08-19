@@ -2,53 +2,73 @@
 
 Painel pessoal da Vania para organizar oportunidades de renda remota, freelas, estudos e ganhos sem automatizar etapas que precisam ser humanas.
 
-## Arquitetura v0.2
+## Arquitetura v0.3
 
 - **Frontend:** HTML/CSS/JS mobile-first.
-- **Login e banco:** Supabase Auth + Postgres com RLS por usuário.
+- **Login e banco:** Supabase Auth + Postgres com RLS.
 - **IA:** Vercel AI Gateway via AI SDK, executada somente no backend.
-- **Monitor:** no plano Vercel Hobby, o cron roda 1 vez por dia; ao abrir o painel e pelo botão manual, a preferência individual ainda pode respeitar ciclos de 12h ou 24h.
-- **Segurança:** nenhuma chave secreta fica no navegador ou no GitHub.
+- **Monitor:** executado no login quando o ciclo estiver vencido e também manualmente pelo painel.
+- **Segurança:** as APIs de IA aceitam somente a conta proprietária; nenhuma chave secreta fica no navegador ou no GitHub.
+
+## Produção atual
+
+A conta Supabase atingiu o limite de projetos gratuitos, então o Vania Work foi ativado no projeto Supabase já existente da organização CURIÓ, sem misturar os dados operacionais das duas aplicações.
+
+O isolamento é feito assim:
+
+- o Vania Work usa tabelas próprias: `user_preferences`, `opportunities`, `earnings`, `monitor_runs`, `ai_events` e `platform_rules`;
+- a tabela já existente `profiles` recebeu apenas a coluna adicional `display_name`;
+- as policies RLS das tabelas do Vania Work permitem acesso somente ao usuário proprietário do painel;
+- as rotas backend também validam o ID do proprietário antes de chamar a IA;
+- a URL e a publishable key do Supabase são configuração pública e possuem fallback no backend. A autorização real continua sendo feita por Auth + RLS.
+
+A migration aplicada em produção é `supabase/migrations/002_vania_work_shared_backend.sql`.
+
+> `001_vania_work_core.sql` permanece como referência para uma instalação futura em um projeto Supabase dedicado. Não aplique a migration 001 no Supabase compartilhado da CURIÓ.
 
 ## Dados salvos
 
-`profiles`, `user_preferences`, `opportunities`, `earnings`, `monitor_runs`, `ai_events` e `platform_rules`.
+`profiles.display_name`, `user_preferences`, `opportunities`, `earnings`, `monitor_runs`, `ai_events` e `platform_rules`.
 
 ## IA
 
 A IA pode analisar e resumir oportunidades, estimar prioridade, preparar propostas e responder no assistente. Ela não responde screeners, pesquisas, testes humanos nem executa automações bloqueadas pelas regras das plataformas.
 
-## Colocar em produção
+O deploy na Vercel usa o AI Gateway por OIDC quando disponível. `AI_GATEWAY_API_KEY` continua sendo um override opcional.
 
-1. Criar um projeto Supabase separado para o Vania Work.
-2. Aplicar `supabase/migrations/001_vania_work_core.sql` no projeto.
-3. Criar a conta da Vania no Supabase Auth. Se a conta já existir, a migration também cria o perfil e as preferências que faltarem.
-4. Configurar na Vercel as variáveis descritas em `.env.example` para **Production**:
-   - `SUPABASE_URL`
-   - `SUPABASE_PUBLISHABLE_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - `CRON_SECRET`
-   - `AI_GATEWAY_API_KEY` quando o deploy não estiver autenticando o AI Gateway por OIDC
-   - `AI_MODEL` é opcional; o padrão já está definido no código
-5. Fazer um novo deploy de produção depois de salvar as variáveis.
-6. Abrir `/api/health`. O retorno deve mostrar `ok: true` e `missing: []`.
-7. Entrar no site com a conta criada no Supabase Auth e testar:
-   - salvar preferências;
-   - adicionar uma oportunidade;
-   - executar a análise de IA;
-   - registrar um ganho;
-   - executar o monitor manual.
+## Monitor
 
-### Cron no plano Hobby
+No modo atual o monitor é real, mas não usa cron público nem service role:
 
-O deploy usa `0 12 * * *`, ou seja, um ciclo agendado por dia. A limitação evita a falha de deploy do plano Hobby. O monitor também é executado quando a usuária entra no painel se o ciclo configurado estiver vencido, e pode ser disparado manualmente.
+1. ao entrar no painel, ele verifica se o ciclo de 12h/24h venceu;
+2. se venceu, analisa as oportunidades autenticadas da proprietária;
+3. o botão do monitor também força uma execução manual;
+4. cada execução é registrada em `monitor_runs` e os eventos de IA em `ai_events`.
 
-### Observação sobre Supabase Data API
-
-Projetos Supabase recentes podem não expor tabelas novas ao Data API automaticamente. A migration deste repositório já contém os `GRANT`s necessários para `authenticated` e `service_role`, mantendo RLS habilitado para proteger os dados de cada usuário.
+Isso evita guardar uma service-role key na Vercel e mantém o backend compatível com o plano Hobby.
 
 ## Diagnóstico
 
-`GET /api/health` não retorna segredos. Ele mostra somente se banco, acesso administrativo, IA e cron estão configurados e lista o nome das variáveis ausentes.
+`GET /api/health` não retorna segredos. Ele mostra se a conexão pública com o banco, a trava de proprietário e a IA estão disponíveis.
 
-A aplicação mantém o modo demonstração quando o backend ainda não está configurado.
+Fluxo de validação:
+
+1. entrar com a conta proprietária já existente no Supabase;
+2. salvar preferências;
+3. adicionar uma oportunidade;
+4. executar a análise de IA;
+5. registrar um ganho;
+6. executar o monitor manual;
+7. sair e entrar novamente para validar persistência e monitor por ciclo.
+
+## Variáveis opcionais
+
+O projeto já possui fallback de produção para os valores públicos necessários ao Supabase. As variáveis abaixo servem apenas como override:
+
+- `SUPABASE_URL`
+- `SUPABASE_PUBLISHABLE_KEY`
+- `VANIA_OWNER_ID`
+- `AI_GATEWAY_API_KEY`
+- `AI_MODEL`
+
+Nenhuma `SUPABASE_SERVICE_ROLE_KEY` é necessária no modo atual.
